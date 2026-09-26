@@ -215,6 +215,22 @@ async function runPopupScenario(session, origin) {
   }
   if (!/x-cache: HIT/.test(text)) problems.push("popup did not show the cache evidence");
 
+  // The export is the only thing that leaves the popup, so check its shape.
+  const report = JSON.parse(
+    await popup.eval("JSON.stringify(buildReport(currentFindings))")
+  );
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(EXTENSION_DIR, "manifest.json"), "utf8")
+  );
+  if (report.version !== manifest.version) {
+    problems.push("the export reported version " + report.version);
+  }
+  if (report.findings.length !== 1) {
+    problems.push("the export should carry the tab's one URL, got " + report.findings.length);
+  }
+  if (!report.findings.every((f) => f.url && f.lastSeen && f.cache)) {
+    problems.push("the export dropped fields");
+  }
   // A header value is server-controlled, so it must never become markup.
   const hostileText = await render(tabHolding(snapshot, "hostile.js"));
   const injected = await popup.eval('document.querySelectorAll("#findings script").length');
@@ -224,6 +240,63 @@ async function runPopupScenario(session, origin) {
   if (!hostileText.includes("<script>")) {
     problems.push("the hostile header value was not rendered as literal text");
   }
+
+  popup.close();
+  return problems;
+}
+
+// The skip log answers "I loaded the URL that should be vulnerable and nothing
+// showed up -- why?". A known-safe asset has to appear there, with its reason.
+async function runSkipLogScenario(session, origin) {
+  const problems = [];
+
+  await session.visit(origin + "/static-app.js", 2000);
+
+  const skipsByTab = JSON.parse(
+    await session.worker.eval("JSON.stringify(recentSkips)", true)
+  );
+  const tabId = Object.keys(skipsByTab).find((id) =>
+    (skipsByTab[id] || []).some((skip) => skip.url.endsWith("/static-app.js"))
+  );
+  if (!tabId) return ["an ordinary .js asset never appeared in the skip log"];
+
+  const entry = skipsByTab[tabId].find((skip) => skip.url.endsWith("/static-app.js"));
+  if (entry.reason !== "not-document") {
+    problems.push("expected reason not-document, got " + entry.reason);
+  }
+  if (entry.detail !== "text/javascript") {
+    problems.push("expected the real content type to be recorded, got " + entry.detail);
+  }
+
+  // The popup has to render it, or the diagnostic only exists in devtools.
+  await session.browser.send("Target.createTarget", { url: session.popupUrl });
+  await sleep(1500);
+  const popupTarget = (await session.list()).find((t) => t.url === session.popupUrl);
+  const popup = await CDP.connect(popupTarget.webSocketDebuggerUrl);
+
+  const response = await popup.eval(
+    `new Promise(r => chrome.runtime.sendMessage({type:"GET_SKIPS",tabId:${tabId}}, resp => r(JSON.stringify(resp))))`,
+    true
+  );
+  await popup.eval(`renderSkips(${JSON.stringify(JSON.parse(response).skips)})`);
+  await popup.eval(`document.getElementById("toggle-skips").click()`);
+
+  const text = await popup.eval(`document.getElementById("skips").innerText`);
+  if (!text.includes("/static-app.js")) {
+    problems.push("the popup did not list the rejected URL");
+  }
+  if (!text.includes("served as text/javascript, not a document")) {
+    problems.push("the popup did not explain why the request was not flagged");
+  }
+
+  // The skip log renders network-supplied values too, so it gets the same test.
+  await popup.eval(
+    `renderSkips([{url:"http://example.com/<img src=x onerror=1>.js",reason:"not-document",detail:null}])`
+  );
+  const skipInjected = await popup.eval(
+    'document.querySelectorAll("#skips img, #skips script").length'
+  );
+  if (skipInjected !== 0) problems.push("a skip entry injected markup into the popup");
 
   popup.close();
   return problems;
@@ -334,6 +407,7 @@ async function main() {
         run: () => runPathScenario(session, site.origin, scenario),
       })),
       { name: "popup collapses repeats and explains the finding", run: () => runPopupScenario(session, site.origin) },
+      { name: "the skip log explains why a safe request was ignored", run: () => runSkipLogScenario(session, site.origin) },
       { name: "findings survive a service worker restart", run: () => runPersistenceScenario(session, site.origin) },
     ];
 

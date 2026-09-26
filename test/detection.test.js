@@ -71,6 +71,7 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
   vm.runInContext(
     SOURCE +
       "\n;globalThis.__findings = (t) => findingsByTab[t] || [];" +
+      "\n;globalThis.__skips = (t) => recentSkips[t] || [];" +
       "\nglobalThis.__hydrated = hydrated;",
     ctx,
     { filename: "background.js" }
@@ -112,6 +113,14 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
       L.msg({ type: "GET_FINDINGS", tabId }, null, (r) => resolve(r.findings));
     });
 
+  // The skip log: what looked suspicious but was rejected, and why.
+  const skips = (tabId = 1) => ctx.__skips(tabId);
+
+  const skipsViaMessage = (tabId = 1) =>
+    new Promise((resolve) => {
+      L.msg({ type: "GET_SKIPS", tabId }, null, (r) => resolve(r.skips));
+    });
+
   // Let the storage read and any fire-and-forget writes settle.
   const settle = () =>
     Promise.resolve(ctx.__hydrated).then(
@@ -122,8 +131,8 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
     L.nav({ frameId: 0, tabId, url: "https://example.com/" });
 
   return {
-    send, receive, request, findings, findingsViaMessage, settle,
-    navigate, badges, L, ctx, storage: session,
+    send, receive, request, findings, findingsViaMessage, skips, skipsViaMessage,
+    settle, navigate, badges, L, ctx, storage: session,
   };
 }
 
@@ -357,6 +366,106 @@ test("a field name that merely starts with a credential word is not a match", ()
     responseHeaders: [...HTML_CACHEABLE, ["vary", "CookieMonster, Authorizationz"]],
   });
   assert.strictEqual(w.findings().length, 1);
+});
+
+// --- skip log: why a suspicious-looking request was not flagged -------------
+
+test("records a rejection when the request carried no session cookie", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/my-account/x.js",
+    cookie: "",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 0);
+  assert.strictEqual(w.skips().length, 1);
+  assert.strictEqual(w.skips()[0].reason, "no-session-cookie");
+  assert.strictEqual(w.skips()[0].url, "https://example.com/my-account/x.js");
+});
+
+test("records the content type that contradicted the URL", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/static-app.js",
+    responseHeaders: [["content-type", "text/javascript"], ...CACHEABLE],
+  });
+  const skip = w.skips()[0];
+  assert.strictEqual(skip.reason, "not-document");
+  assert.strictEqual(skip.detail, "text/javascript");
+});
+
+test("records which field suppressed a credential-varying response", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/my-account/x.js",
+    responseHeaders: [...HTML_CACHEABLE, ["vary", "Accept-Encoding, Cookie"]],
+  });
+  assert.strictEqual(w.skips()[0].reason, "varies-on-credentials");
+  assert.strictEqual(w.skips()[0].detail, "cookie");
+});
+
+test("records a response with no shared-cache headers", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/my-account/x.js",
+    responseHeaders: [["content-type", "text/html"]],
+  });
+  assert.strictEqual(w.skips()[0].reason, "not-cacheable");
+});
+
+test("stays quiet about URLs that never looked suspicious", () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/dashboard", responseHeaders: HTML_CACHEABLE });
+  w.request({ url: "https://example.com/api/user", responseHeaders: HTML_CACHEABLE });
+  assert.strictEqual(w.skips().length, 0, "ordinary URLs must not fill the skip log");
+});
+
+test("a flagged request leaves no skip entry", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/my-account/x.js",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 1);
+  assert.strictEqual(w.skips().length, 0);
+});
+
+test("skips are kept per tab and capped", () => {
+  const w = loadWorker();
+  for (let i = 0; i < 30; i++) {
+    w.request({
+      url: "https://example.com/a/f" + i + ".js",
+      cookie: "",
+      responseHeaders: HTML_CACHEABLE,
+    });
+  }
+  assert.strictEqual(w.skips().length, 20, "capped at 20");
+
+  w.request({
+    url: "https://example.com/other/x.js",
+    tabId: 2,
+    cookie: "",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.skips(2).length, 1);
+  assert.strictEqual(w.skips(1).length, 20);
+});
+
+test("the newest skip is first", () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/a/first.js", cookie: "", responseHeaders: HTML_CACHEABLE });
+  w.request({ url: "https://example.com/a/second.js", cookie: "", responseHeaders: HTML_CACHEABLE });
+  assert.match(w.skips()[0].url, /second\.js$/);
+});
+
+test("skips are exposed over the message API and cleared with the tab", async () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/a/x.js", cookie: "", responseHeaders: HTML_CACHEABLE });
+  const viaMessage = await w.skipsViaMessage(1);
+  assert.strictEqual(viaMessage.length, 1);
+
+  w.L.removed(1);
+  assert.strictEqual(w.skips().length, 0);
 });
 
 // --- false positives that used to fire on every site ------------------------
@@ -669,4 +778,22 @@ test("manifest asks only for permissions it uses", () => {
   assert.deepStrictEqual([...m.permissions].sort(), ["storage", "webNavigation", "webRequest"]);
   assert.ok(!m.permissions.includes("tabs"), "tabs is not needed");
   assert.ok(!m.permissions.includes("activeTab"), "activeTab is not needed");
+});
+
+test("manifest ships an icon at every size Chrome asks for", () => {
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
+  for (const size of ["16", "32", "48", "128"]) {
+    assert.ok(m.icons?.[size], "manifest has no " + size + "px icon");
+    assert.strictEqual(
+      m.action.default_icon?.[size],
+      m.icons[size],
+      "the toolbar icon for " + size + "px must match the store icon"
+    );
+  }
+});
+
+test("the extension version matches package.json", () => {
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  assert.strictEqual(m.version, pkg.version, "bump both together");
 });

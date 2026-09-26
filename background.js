@@ -6,6 +6,20 @@
 
 const pendingRequests = {};
 
+// Requests that looked suspicious but were rejected, newest first, per tab.
+// Without this, "nothing showed up" is indistinguishable from "a gate threw it
+// away", which is the first question when testing a target that should be
+// vulnerable. Not persisted: it is a debugging aid, not a finding.
+const recentSkips = {};
+const SKIP_LIMIT = 20;
+
+function recordSkip(tabId, url, reason, detail) {
+  if (tabId < 0) return;
+  const skips = recentSkips[tabId] || (recentSkips[tabId] = []);
+  skips.unshift({ url, reason, detail: detail ?? null, timestamp: Date.now() });
+  if (skips.length > SKIP_LIMIT) skips.length = SKIP_LIMIT;
+}
+
 // Findings are keyed by tabId -> array of finding objects. MV3 kills the
 // service worker after ~30s idle, so the in-memory copy is backed by
 // chrome.storage.session: it survives worker restarts but is cleared when the
@@ -111,14 +125,14 @@ const CREDENTIAL_VARY = new Set([
   "proxy-authorization",
 ]);
 
-function variesOnCredentials(headers) {
+function credentialVaryFields(headers) {
   return headers
     .filter((h) => h.name.toLowerCase() === "vary")
     .map((h) => h.value)
     .join(",")
     .split(",")
     .map((field) => field.trim().toLowerCase())
-    .some((field) => CREDENTIAL_VARY.has(field));
+    .filter((field) => CREDENTIAL_VARY.has(field));
 }
 
 function isDocumentResponse(headers) {
@@ -170,26 +184,54 @@ chrome.webRequest.onHeadersReceived.addListener(
     const info = pendingRequests[details.requestId];
     delete pendingRequests[details.requestId];
 
-    if (!info || !info.hasSessionCookie || details.tabId < 0) return;
+    if (!info) return;
 
     const assetMatch = STATIC_ASSET_PATH.exec(info.url);
     const delimiterMatch = DELIMITER_PATH.exec(info.url);
     if (!assetMatch && !delimiterMatch) return;
+    if (details.tabId < 0) return;
 
     const headers = details.responseHeaders || [];
+
+    // Past this point the request looked interesting, so every rejection is
+    // recorded with its reason rather than returning silently.
+    if (!info.hasSessionCookie) {
+      recordSkip(details.tabId, info.url, "no-session-cookie");
+      return;
+    }
 
     // The URL only looks suspicious; the response has to back it up. An asset
     // URL answering with a document is what a successful deception looks like,
     // and requiring it is what removes ordinary static-asset noise.
-    if (!isDocumentResponse(headers)) return;
+    if (!isDocumentResponse(headers)) {
+      recordSkip(
+        details.tabId,
+        info.url,
+        "not-document",
+        headerValue(headers, "content-type")
+      );
+      return;
+    }
 
     // A response that varies on credentials is not shared between users, so
     // there is nothing here for a cache to leak.
-    if (variesOnCredentials(headers)) return;
+    const credentialFields = credentialVaryFields(headers);
+    if (credentialFields.length) {
+      recordSkip(
+        details.tabId,
+        info.url,
+        "varies-on-credentials",
+        credentialFields.join(", ")
+      );
+      return;
+    }
 
     const { looksCacheable, details: cacheDetails } =
       isCacheableResponse(headers);
-    if (!looksCacheable) return;
+    if (!looksCacheable) {
+      recordSkip(details.tabId, info.url, "not-cacheable");
+      return;
+    }
 
     const timestamp = Date.now();
 
@@ -248,6 +290,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete findingsByTab[tabId];
+  delete recentSkips[tabId];
   persist();
 });
 
@@ -278,6 +321,10 @@ chrome.webNavigation?.onBeforeNavigate?.addListener((details) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "GET_SKIPS") {
+    sendResponse({ skips: recentSkips[message.tabId] || [] });
+    return;
+  }
   if (message.type !== "GET_FINDINGS") return;
 
   // Wait for the storage read before answering: a popup opened right after the

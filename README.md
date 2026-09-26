@@ -47,10 +47,31 @@ or Burp) before treating a flagged request as a real vulnerability.
    cache headers were present. Repeat hits on the same URL collapse into one
    row with a ×N count, and the badge counts distinct URLs rather than hits
 4. Findings reset when you navigate to a new page (per-tab)
+5. Click **Export findings (JSON)** to save this tab's findings as a report you
+   can attach to a ticket or a write-up
 
 Findings are held in `chrome.storage.session`, so they survive the extension's
 service worker being shut down (Chrome stops it after ~30 seconds idle) and are
-cleared when the browser closes.
+cleared when the browser closes. The rejected-request log described below is
+not persisted: it is a debugging aid, not a finding.
+
+## When nothing is flagged
+
+"Nothing showed up" is ambiguous. Either no suspicious-looking URL was seen at
+all, or one was seen and a check threw it away. The popup's **Why nothing
+flagged?** section lists the requests that looked suspicious and were then
+dropped, with the reason:
+
+| Reason | What it means |
+| --- | --- |
+| `no-session-cookie` | the request sent no session cookie, so there was nothing private to leak |
+| `not-document` | the response really was the asset type the URL claimed (e.g. `text/javascript`) |
+| `varies-on-credentials` | the response varies on `Cookie`/`Authorization`, so each user gets their own copy |
+| `not-cacheable` | no shared cache would keep it (`no-store`, `private`, or no cache headers at all) |
+
+So if you load a URL that should be vulnerable and get nothing, open this
+section first. If the URL is not in that list either, then no request carrying
+a session cookie was made for it in that tab.
 
 ## Testing it against a known-vulnerable pattern
 
@@ -81,6 +102,9 @@ cannot reproduce:
 - the real service worker lifecycle, so persistence is proven by destroying the
   worker and reviving it rather than by trusting that a storage call happened
 - the popup's rendered DOM, including that a header value cannot inject markup
+- the diagnostic log: a known-safe asset has to show up as `not-document`, both
+  in the worker's state and in the popup, and a hostile value must not become
+  markup
 
 It starts a fixture server on an ephemeral port, launches Chrome with a
 throwaway profile, and loads the extension over CDP. Set `CHROME_PATH` if Chrome
@@ -91,7 +115,7 @@ Chrome 137+ branded builds ignore `--load-extension` and
 `--disable-extensions-except`, so the extension is loaded with
 `Extensions.loadUnpacked`, which requires `--enable-unsafe-extension-debugging`.
 
-## Known limitations (v1)
+## Known limitations
 
 - Trusts `Vary` as implemented. A response varying on `Cookie` or
   `Authorization` is treated as not exploitable, which is correct for a cache
@@ -100,12 +124,30 @@ Chrome 137+ branded builds ignore `--load-extension` and
 - A response with no `Content-Type`, or one sent as
   `application/octet-stream`, is not treated as a contradiction, so a
   genuinely mislabelled asset is missed rather than guessed at.
-- Doesn't test URL normalization variants automatically yet (planned v2: a
-  button to fire safe variant requests and diff cache behavior)
+- Everything here is a heuristic over response headers. It is checked against a
+  fixture server and the unit suite, but not yet against a live vulnerable
+  target, so treat the first real-world run as a calibration exercise.
 
-## Next steps (v2 ideas)
+## Deliberately not built
 
-- Add a "test variants" button: fire safe passive requests with delimiter
-  tricks and diff the `Cache-Control`/`X-Cache` response between them
-- Parse `Vary` header to reduce false positives
-- Export findings as a JSON report
+- A "test the variants for me" button. Firing delimiter-trick requests from the
+  extension would turn observing traffic into probing a target, and it can cache
+  the user's own authenticated page in a shared cache -- the exact harm this
+  tool exists to report. The tool stays passive on purpose.
+
+## Next steps
+
+- Validate against a PortSwigger Web Cache Deception lab, and write down what
+  the real headers look like so the heuristics can be tuned to them
+- A passive-only cache check: revisit the same URL twice and compare `Age` or
+  `X-Cache` to see whether the CDN actually honoured `Vary`
+- Screenshots of the popup for the store listing
+
+## Privacy
+
+No data leaves the browser. Findings live in `chrome.storage.session` and are
+gone when the browser closes. `PRIVACY.md` has the full policy.
+
+## License
+
+MIT -- see `LICENSE`.
