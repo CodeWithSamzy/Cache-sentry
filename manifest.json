@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Cache Sentry",
+  "version": "0.1.0",
+  "description": "Passively flags web cache deception risks while you browse — no active exploitation.",
+  "permissions": [
+    "webRequest",
+    "storage",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Cache Sentry"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "cache-sentry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Passive Chrome extension that flags web cache deception signals while you browse.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node test/detection.test.js",
+    "test:e2e": "node test/e2e/run.js",
+    "test:all": "npm test && npm run test:e2e"
+  }
+}

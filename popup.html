@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Cache Sentry</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <span class="title">Cache Sentry</span>
+      <span class="subtitle">Passive cache deception watch</span>
+    </header>
+    <div id="findings"></div>
+    <footer>
+      Flags requests that send a session cookie and get a cacheable response for
+      a URL that looks static but answered with a document. Verify manually
+      before reporting — this is a signal, not proof.
+    </footer>
+    <script src="popup.js"></script>
+  </body>
+</html>
