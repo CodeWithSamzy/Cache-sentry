@@ -63,10 +63,33 @@ const ROUTES = {
 };
 
 function start() {
+  // Requests under a static directory behave like a CDN with a static
+  // directory cache rule: the first one misses and is stored, later ones are
+  // served from cache. This is the shape the detector cannot see, because the
+  // URL looks nothing like a file.
+  const hits = new Map();
+
+  const staticDirectory = (path) => {
+    if (!path.startsWith("/resources/")) return null;
+    const count = (hits.get(path) || 0) + 1;
+    hits.set(path, count);
+    return {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html",
+        "Cache-Control": "public, max-age=60",
+        Age: String(count - 1),
+        "X-Cache": count === 1 ? "miss" : "HIT",
+      },
+      body: "<h1>private page</h1>",
+    };
+  };
+
   const server = http.createServer((req, res) => {
-    const route = ROUTES[req.url.split("?")[0]];
-    const { status, headers, body } = route
-      ? route()
+    const path = req.url.split("?")[0];
+    const response = staticDirectory(path) || (ROUTES[path] ? ROUTES[path]() : null);
+    const { status, headers, body } = response
+      ? response
       : { status: 404, headers: { "Content-Type": "text/plain" }, body: "not found" };
     res.writeHead(status, headers);
     res.end(body);

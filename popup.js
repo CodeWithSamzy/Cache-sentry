@@ -1,4 +1,5 @@
 const findingsEl = document.getElementById("findings");
+const documentsEl = document.getElementById("documents");
 const skipsEl = document.getElementById("skips");
 const toggleEl = document.getElementById("toggle-skips");
 const exportEl = document.getElementById("export");
@@ -69,6 +70,54 @@ function render(findings) {
   }
 
   findingsEl.innerHTML = currentFindings.map(findingHtml).join("");
+}
+
+// --- page loads (diagnostic) ------------------------------------------------
+// The detector only speaks up when a URL looks like a static file, so a static
+// *directory* path (`/resources/anything`, no extension) can be cached while the
+// extension stays silent. This section reports what the cache did with the
+// documents this tab loaded, which is what makes "did my URL get stored?"
+// answerable at all.
+
+function documentVerdict(doc) {
+  const evidence = doc.sharedCacheEvidence || [];
+  if (evidence.length) {
+    return (
+      `<span class="chip cached">from cache</span>` +
+      escapeHtml(evidence.join(" \u00b7 "))
+    );
+  }
+
+  const seen = doc.cacheControl
+    ? `cache-control: ${doc.cacheControl}`
+    : "no cache headers seen";
+  return `<span class="chip fresh">no cache hit</span>${escapeHtml(seen)}`;
+}
+
+function documentHtml(doc) {
+  const meta = [
+    `status ${doc.status}`,
+    doc.contentType || "no content-type",
+    doc.hasSessionCookie ? "session cookie sent" : "no session cookie",
+    new Date(doc.timestamp).toLocaleTimeString(),
+  ];
+
+  return `
+    <div class="doc">
+      <div class="url" title="${escapeHtml(doc.url)}">${escapeHtml(doc.url)}</div>
+      <div class="verdict">${documentVerdict(doc)}</div>
+      <div class="meta">${escapeHtml(meta.join(" \u00b7 "))}</div>
+    </div>
+  `;
+}
+
+function renderDocuments(loads) {
+  if (!loads || loads.length === 0) {
+    documentsEl.innerHTML = `<p class="empty">No page load recorded for this tab yet.</p>`;
+    return;
+  }
+
+  documentsEl.innerHTML = loads.map(documentHtml).join("");
 }
 
 // --- rejected requests (diagnostic) -----------------------------------------
@@ -166,7 +215,10 @@ function load(tabId) {
       render(findings?.findings);
       chrome.runtime.sendMessage({ type: "GET_SKIPS", tabId }, (skips) => {
         renderSkips(skips?.skips);
-        resolve();
+        chrome.runtime.sendMessage({ type: "GET_DOCUMENTS", tabId }, (docs) => {
+          renderDocuments(docs?.documents);
+          resolve();
+        });
       });
     });
   });

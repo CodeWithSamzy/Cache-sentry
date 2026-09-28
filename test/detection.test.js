@@ -72,6 +72,7 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
     SOURCE +
       "\n;globalThis.__findings = (t) => findingsByTab[t] || [];" +
       "\n;globalThis.__skips = (t) => recentSkips[t] || [];" +
+      "\n;globalThis.__documents = (t) => recentDocuments[t] || [];" +
       "\nglobalThis.__hydrated = hydrated;",
     ctx,
     { filename: "background.js" }
@@ -88,11 +89,12 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
         (cookie ? [{ name: "Cookie", value: cookie }] : []),
     });
 
-  const receive = ({ url, tabId = 1, status = 200, responseHeaders = [] }) =>
+  const receive = ({ url, tabId = 1, status = 200, type = "main_frame", responseHeaders = [] }) =>
     L.recv({
       requestId: `${seq}`,
       url,
       tabId,
+      type,
       statusCode: status,
       responseHeaders: responseHeaders.map(([name, value]) => ({ name, value })),
     });
@@ -121,6 +123,14 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
       L.msg({ type: "GET_SKIPS", tabId }, null, (r) => resolve(r.skips));
     });
 
+  // The page-load readout: what the cache did with each main document.
+  const documents = (tabId = 1) => ctx.__documents(tabId);
+
+  const documentsViaMessage = (tabId = 1) =>
+    new Promise((resolve) => {
+      L.msg({ type: "GET_DOCUMENTS", tabId }, null, (r) => resolve(r.documents));
+    });
+
   // Let the storage read and any fire-and-forget writes settle.
   const settle = () =>
     Promise.resolve(ctx.__hydrated).then(
@@ -132,6 +142,7 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
 
   return {
     send, receive, request, findings, findingsViaMessage, skips, skipsViaMessage,
+    documents, documentsViaMessage,
     settle, navigate, badges, L, ctx, storage: session,
   };
 }
@@ -796,4 +807,149 @@ test("the extension version matches package.json", () => {
   const m = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
   assert.strictEqual(m.version, pkg.version, "bump both together");
+});
+
+// --- page loads: the "was this stored?" readout ------------------------------
+// The detector only analyses URLs that look like static files, so the shape a
+// static *directory* cache rule needs is invisible to it. These cover the
+// readout that exists precisely for those URLs.
+
+test("records a main document even when the URL never looked suspicious", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/resources/private",
+    responseHeaders: [
+      ["content-type", "text/html"],
+      ["cache-control", "public, max-age=60"],
+    ],
+  });
+
+  assert.strictEqual(w.findings().length, 0, "a bare directory path is not a finding");
+  const doc = w.documents()[0];
+  assert.strictEqual(doc.url, "https://example.com/resources/private");
+  assert.strictEqual(doc.contentType, "text/html");
+  assert.strictEqual(doc.cacheControl, "public, max-age=60");
+  assert.strictEqual(doc.hasSessionCookie, true, "the cookie is what makes it interesting");
+  assert.deepStrictEqual(plain(doc.sharedCacheEvidence), []);
+});
+
+test("ignores sub-resources when recording page loads", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/resources/app.js",
+    type: "script",
+    responseHeaders: [["content-type", "text/javascript"]],
+  });
+  w.request({
+    url: "https://example.com/resources/site.css",
+    type: "stylesheet",
+    responseHeaders: [["content-type", "text/css"]],
+  });
+  assert.strictEqual(w.documents().length, 0, "only the main document is a page load");
+});
+
+test("reports a load that a shared cache actually served", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/resources/private",
+    responseHeaders: [
+      ["content-type", "text/html"],
+      ["cache-control", "public, max-age=60"],
+      ["age", "7"],
+      ["x-cache", "HIT"],
+    ],
+  });
+  assert.deepStrictEqual(plain(w.documents()[0].sharedCacheEvidence), [
+    "age: 7",
+    "x-cache: HIT",
+  ]);
+});
+
+test("a cache miss is not reported as proof of caching", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/resources/private",
+    responseHeaders: [
+      ["content-type", "text/html"],
+      ["cache-control", "public, max-age=60"],
+      ["age", "0"],
+      ["x-cache", "miss"],
+    ],
+  });
+  assert.deepStrictEqual(plain(w.documents()[0].sharedCacheEvidence), []);
+});
+
+test("a CDN hit marker counts even without an Age", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/resources/private",
+    responseHeaders: [["content-type", "text/html"], ["cf-cache-status", "HIT"]],
+  });
+  assert.deepStrictEqual(plain(w.documents()[0].sharedCacheEvidence), [
+    "cf-cache-status: HIT",
+  ]);
+});
+
+test("keeps the last five page loads, newest first", () => {
+  const w = loadWorker();
+  for (let i = 0; i < 7; i++) {
+    w.request({ url: "https://example.com/page" + i, responseHeaders: HTML });
+  }
+  const urls = w.documents().map((doc) => doc.url);
+  assert.strictEqual(urls.length, 5, "capped at 5");
+  assert.match(urls[0], /page6$/, "newest first");
+  assert.match(urls[4], /page2$/);
+});
+
+test("a reload is kept as its own history entry", () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/resources/x", responseHeaders: HTML });
+  w.request({
+    url: "https://example.com/resources/x",
+    responseHeaders: [...HTML, ["age", "3"], ["x-cache", "HIT"]],
+  });
+  assert.strictEqual(w.documents().length, 2, "the first and second visit must both show");
+  assert.deepStrictEqual(plain(w.documents()[0].sharedCacheEvidence), ["age: 3", "x-cache: HIT"]);
+  assert.deepStrictEqual(plain(w.documents()[1].sharedCacheEvidence), []);
+});
+
+test("page loads are per tab and cleared with the tab", () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/a", tabId: 1, responseHeaders: HTML });
+  w.request({ url: "https://example.com/b", tabId: 2, responseHeaders: HTML });
+
+  assert.strictEqual(w.documents(1).length, 1);
+  assert.strictEqual(w.documents(2).length, 1);
+
+  w.L.removed(1);
+  assert.strictEqual(w.documents(1).length, 0);
+  assert.strictEqual(w.documents(2).length, 1, "closing one tab must not clear another");
+});
+
+test("page loads are exposed over the message API", async () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/a", responseHeaders: HTML });
+  const viaMessage = await w.documentsViaMessage(1);
+  assert.strictEqual(viaMessage.length, 1);
+  assert.strictEqual(viaMessage[0].url, "https://example.com/a");
+});
+
+test("ignores a document load for a non-tab request", () => {
+  const w = loadWorker();
+  w.request({ url: "https://example.com/a", tabId: -1, responseHeaders: HTML });
+  assert.strictEqual(w.documents(-1).length, 0);
+});
+
+test("records a document load whose request headers were never seen", () => {
+  const w = loadWorker();
+  w.L.recv({
+    requestId: "999",
+    url: "https://example.com/a",
+    tabId: 1,
+    statusCode: 200,
+    type: "main_frame",
+    responseHeaders: [{ name: "content-type", value: "text/html" }],
+  });
+  assert.strictEqual(w.documents().length, 1, "a missed cookie read must not hide the page");
+  assert.strictEqual(w.documents()[0].hasSessionCookie, false);
 });

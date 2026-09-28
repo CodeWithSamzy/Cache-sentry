@@ -24,8 +24,18 @@ header {
   margin-top: 2px;
 }
 
+.section-title {
+  margin: 0;
+  padding: 9px 14px 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a8880;
+}
+
 #findings {
-  max-height: 420px;
+  max-height: 300px;
   overflow-y: auto;
 }
 
@@ -78,11 +88,63 @@ header {
 }
 
 .empty {
-  padding: 20px 14px;
+  padding: 16px 14px;
   font-size: 12px;
   color: #6b6a64;
   text-align: center;
   margin: 0;
+}
+
+#page {
+  border-top: 1px solid #e4e2dc;
+}
+
+#documents {
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.doc {
+  padding: 8px 14px;
+  border-bottom: 1px solid #e4e2dc;
+  font-size: 11px;
+}
+
+.doc .url {
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #3d4550;
+  margin-bottom: 3px;
+}
+
+.doc .verdict {
+  color: #55534d;
+  margin-bottom: 2px;
+}
+
+.doc .meta {
+  color: #8a8880;
+  font-size: 10px;
+}
+
+.chip {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.chip.cached {
+  background: #f7e0bd;
+  color: #7a4a08;
+}
+
+.chip.fresh {
+  background: #e7e5df;
+  color: #55534d;
 }
 
 #debug {
@@ -107,10 +169,10 @@ header {
 }
 
 #skips {
-  max-height: 260px;
+  max-height: 170px;
   overflow-y: auto;
-  border-top: 1px solid #e4e2dc;
   background: #f4f3ee;
+  border-top: 1px solid #e4e2dc;
 }
 
 .skip {

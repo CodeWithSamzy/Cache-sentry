@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Cache Sentry",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Passively flags web cache deception risks while you browse — no active exploitation.",
   "icons": {
     "16": "icons/icon16.png",

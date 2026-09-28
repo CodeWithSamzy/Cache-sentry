@@ -302,6 +302,67 @@ async function runSkipLogScenario(session, origin) {
   return problems;
 }
 
+// The lab shape: a static *directory* cache rule, which the detector ignores on
+// purpose because the URL looks nothing like a file. The readout is what makes
+// it visible: load once, reload, and the second load is served from cache.
+async function runDocumentScenario(session, origin) {
+  const problems = [];
+  const url = origin + "/resources/private";
+
+  await session.visit(url, 1800);
+
+  const page = (await session.list()).find((t) => t.url === url);
+  if (!page) return ["the page load target never opened"];
+  const pageConn = await CDP.connect(page.webSocketDebuggerUrl);
+  await pageConn.send("Page.reload");
+  await sleep(2200);
+  pageConn.close();
+
+  const byTab = JSON.parse(
+    await session.worker.eval("JSON.stringify(recentDocuments)", true)
+  );
+  const tabId = Object.keys(byTab).find((id) =>
+    (byTab[id] || []).some((load) => load.url.endsWith("/resources/private"))
+  );
+  if (!tabId) return ["the page load was never recorded"];
+
+  const loads = byTab[tabId].filter((load) => load.url.endsWith("/resources/private"));
+  if (loads.length < 2) problems.push("both visits should be kept, got " + loads.length);
+  if (!(loads[0].sharedCacheEvidence || []).length) {
+    problems.push("the second load should be reported as served from cache");
+  }
+  if (loads[0].contentType !== "text/html") {
+    problems.push("the content type was not recorded, got " + loads[0].contentType);
+  }
+  if (!loads[0].hasSessionCookie) problems.push("the session cookie was not recorded");
+
+  // It must not be a finding: a bare directory path is exactly what the
+  // detector ignores, which is why the readout has to exist.
+  const findings = await session.snapshot();
+  if ((findings[tabId] || []).some((f) => f.url.endsWith("/resources/private"))) {
+    problems.push("a bare directory path must not be flagged");
+  }
+
+  await session.browser.send("Target.createTarget", { url: session.popupUrl });
+  await sleep(1500);
+  const popupTarget = (await session.list()).find((t) => t.url === session.popupUrl);
+  const popup = await CDP.connect(popupTarget.webSocketDebuggerUrl);
+
+  const response = await popup.eval(
+    `new Promise(r => chrome.runtime.sendMessage({type:"GET_DOCUMENTS",tabId:${tabId}}, resp => r(JSON.stringify(resp))))`,
+    true
+  );
+  await popup.eval(`renderDocuments(${JSON.stringify(JSON.parse(response).documents)})`);
+
+  const text = await popup.eval('document.getElementById("documents").innerText');
+  if (!text.includes("/resources/private")) problems.push("the popup did not list the page load");
+  if (!text.includes("from cache")) problems.push("the popup did not report the cache hit");
+  if (!text.includes("x-cache: HIT")) problems.push("the popup did not show the cache evidence");
+
+  popup.close();
+  return problems;
+}
+
 async function runPersistenceScenario(session, origin) {
   const problems = [];
 
@@ -408,6 +469,7 @@ async function main() {
       })),
       { name: "popup collapses repeats and explains the finding", run: () => runPopupScenario(session, site.origin) },
       { name: "the skip log explains why a safe request was ignored", run: () => runSkipLogScenario(session, site.origin) },
+      { name: "the page load readout shows a static directory being cached", run: () => runDocumentScenario(session, site.origin) },
       { name: "findings survive a service worker restart", run: () => runPersistenceScenario(session, site.origin) },
     ];
 

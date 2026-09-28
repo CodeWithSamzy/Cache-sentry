@@ -47,7 +47,9 @@ or Burp) before treating a flagged request as a real vulnerability.
    cache headers were present. Repeat hits on the same URL collapse into one
    row with a ×N count, and the badge counts distinct URLs rather than hits
 4. Findings reset when you navigate to a new page (per-tab)
-5. Click **Export findings (JSON)** to save this tab's findings as a report you
+5. Check **Page loads** to see what the cache did with the documents this tab
+   fetched, including plain directory paths the detector leaves alone
+6. Click **Export findings (JSON)** to save this tab's findings as a report you
    can attach to a ticket or a write-up
 
 Findings are held in `chrome.storage.session`, so they survive the extension's
@@ -72,6 +74,27 @@ dropped, with the reason:
 So if you load a URL that should be vulnerable and get nothing, open this
 section first. If the URL is not in that list either, then no request carrying
 a session cookie was made for it in that tab.
+
+## Is this URL actually cached?
+
+The detector only analyses URLs that look like static files, so a static
+*directory* path (`/resources/anything`, no file extension) is invisible to it
+even while a cache is storing it. The popup's **Page loads** section covers that
+gap, because it records every main document this tab fetched rather than only
+the suspicious-looking ones.
+
+| What the readout shows | What it means |
+| --- | --- |
+| `no cache hit` | no `Age` or hit marker, so this load was not served from a shared cache |
+| `from cache` with `age: 7 · x-cache: HIT` | a shared cache served this response |
+
+Load a URL, then load it again. Both entries stay in the list, so a first visit
+that misses and a second that hits is visible as a change between them. That is
+the passive answer to "does this URL get cached?" -- it reports requests Chrome
+already made and never sends one of its own.
+
+If Chrome's own HTTP cache answers instead of the network, no new entry is
+recorded. Change the path or add a query string to force a real fetch.
 
 ## Testing it against a known-vulnerable pattern
 
@@ -105,6 +128,9 @@ cannot reproduce:
 - the diagnostic log: a known-safe asset has to show up as `not-document`, both
   in the worker's state and in the popup, and a hostile value must not become
   markup
+- the page-load readout against a real static-directory cache rule: the first
+  load misses, the reload is reported as `from cache`, and the URL is correctly
+  *not* turned into a finding
 
 It starts a fixture server on an ephemeral port, launches Chrome with a
 throwaway profile, and loads the extension over CDP. Set `CHROME_PATH` if Chrome
@@ -124,6 +150,10 @@ Chrome 137+ branded builds ignore `--load-extension` and
 - A response with no `Content-Type`, or one sent as
   `application/octet-stream`, is not treated as a contradiction, so a
   genuinely mislabelled asset is missed rather than guessed at.
+- A static directory path with no file extension is never turned into a finding,
+  even when a cache is storing it. **Page loads** shows it instead, which keeps
+  the finding list clear of the false positives that shape would otherwise
+  produce.
 - Everything here is a heuristic over response headers. It is checked against a
   fixture server and the unit suite, but not yet against a live vulnerable
   target, so treat the first real-world run as a calibration exercise.
@@ -139,8 +169,8 @@ Chrome 137+ branded builds ignore `--load-extension` and
 
 - Validate against a PortSwigger Web Cache Deception lab, and write down what
   the real headers look like so the heuristics can be tuned to them
-- A passive-only cache check: revisit the same URL twice and compare `Age` or
-  `X-Cache` to see whether the CDN actually honoured `Vary`
+- Turn the readout into a verdict: when a URL that `Vary`s on a credential is
+  still served `from cache`, say so outright instead of leaving it to be read
 - Screenshots of the popup for the store listing
 
 ## Privacy

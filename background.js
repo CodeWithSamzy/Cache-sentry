@@ -19,6 +19,44 @@ function recordSkip(tabId, url, reason, detail) {
   skips.unshift({ url, reason, detail: detail ?? null, timestamp: Date.now() });
   if (skips.length > SKIP_LIMIT) skips.length = SKIP_LIMIT;
 }
+// Main-document loads per tab, newest first. This is the readout that answers
+// "what did the cache actually do with the page I just loaded?", including for
+// URLs the detector ignores on purpose (an ordinary asset, or a static
+// directory path with no file extension at all). In memory only, like the skip
+// log: it is a debugging aid, not a finding.
+const recentDocuments = {};
+const DOCUMENT_LIMIT = 5;
+
+// Proof that a shared cache served this response, as opposed to merely being
+// allowed to store it: an Age above zero, or a hit marker from a CDN. A miss
+// does not count, and neither does a bare Cache-Control.
+function sharedCacheEvidence(headers) {
+  const age = headerValue(headers, "age");
+  const xCache = headerValue(headers, "x-cache");
+  const cfCache = headerValue(headers, "cf-cache-status");
+
+  return [
+    age != null && Number(age) > 0 ? `age: ${age}` : null,
+    xCache && /hit/i.test(xCache) ? `x-cache: ${xCache}` : null,
+    cfCache && /hit/i.test(cfCache) ? `cf-cache-status: ${cfCache}` : null,
+  ].filter(Boolean);
+}
+
+function recordDocumentLoad(tabId, url, status, headers, hasSessionCookie) {
+  if (tabId < 0) return;
+
+  const loads = recentDocuments[tabId] || (recentDocuments[tabId] = []);
+  loads.unshift({
+    url,
+    status,
+    timestamp: Date.now(),
+    hasSessionCookie: !!hasSessionCookie,
+    contentType: headerValue(headers, "content-type"),
+    cacheControl: headerValue(headers, "cache-control"),
+    sharedCacheEvidence: sharedCacheEvidence(headers),
+  });
+  if (loads.length > DOCUMENT_LIMIT) loads.length = DOCUMENT_LIMIT;
+}
 
 // Findings are keyed by tabId -> array of finding objects. MV3 kills the
 // service worker after ~30s idle, so the in-memory copy is backed by
@@ -184,6 +222,19 @@ chrome.webRequest.onHeadersReceived.addListener(
     const info = pendingRequests[details.requestId];
     delete pendingRequests[details.requestId];
 
+    // Recorded before any heuristic runs, and before the early return below:
+    // the readout has to cover the pages the detector ignores on purpose, or
+    // it cannot answer whether the cache stored them.
+    if (details.type === "main_frame") {
+      recordDocumentLoad(
+        details.tabId,
+        details.url,
+        details.statusCode,
+        details.responseHeaders || [],
+        info?.hasSessionCookie
+      );
+    }
+
     if (!info) return;
 
     const assetMatch = STATIC_ASSET_PATH.exec(info.url);
@@ -291,6 +342,7 @@ chrome.webRequest.onHeadersReceived.addListener(
 chrome.tabs.onRemoved.addListener((tabId) => {
   delete findingsByTab[tabId];
   delete recentSkips[tabId];
+  delete recentDocuments[tabId];
   persist();
 });
 
@@ -323,6 +375,10 @@ chrome.webNavigation?.onBeforeNavigate?.addListener((details) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "GET_SKIPS") {
     sendResponse({ skips: recentSkips[message.tabId] || [] });
+    return;
+  }
+  if (message.type === "GET_DOCUMENTS") {
+    sendResponse({ documents: recentDocuments[message.tabId] || [] });
     return;
   }
   if (message.type !== "GET_FINDINGS") return;

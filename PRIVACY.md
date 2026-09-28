@@ -14,7 +14,8 @@ not send anything anywhere.
 
 - Findings are held in memory and in `chrome.storage.session`, which Chrome
   keeps for the life of the browser session and clears when the browser closes.
-- The rejected-request log is held in memory only.
+- The rejected-request log and the recent page-load readout are held in memory
+  only.
 - Nothing is written to `chrome.storage.local` or `chrome.storage.sync`, so
   nothing is synced to your Google account.
 - Nothing is uploaded. There is no analytics, no telemetry, and no remote code.
