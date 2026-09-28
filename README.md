@@ -6,6 +6,9 @@ response headers on requests that carry a session cookie.
 
 Built by [CodeWithSamzy](https://github.com/CodeWithSamzy).
 
+**Install:** [download the latest release](https://github.com/CodeWithSamzy/Cache-sentry/releases/latest)
+and follow [the install steps](#install).
+
 ## What it detects
 
 A request is flagged when **all** of these are true:
@@ -43,9 +46,7 @@ are, so nobody needs Node or npm to install it.
 ### If you just want to use it
 
 1. Open the [Releases page](https://github.com/CodeWithSamzy/Cache-sentry/releases)
-   and download the newest `cache-sentry-<version>-unpacked.zip`. If no release
-   is listed yet, use **Code > Download ZIP** on the repository page instead --
-   that folder works too, it just carries the tests and docs along with it
+   and download `cache-sentry-<version>-unpacked.zip` from the newest release
 2. Unzip it. You get a single folder named `cache-sentry`. Keep it somewhere
    permanent -- Chrome reads that folder every time it starts, and the
    extension stops working if the folder is moved or deleted
