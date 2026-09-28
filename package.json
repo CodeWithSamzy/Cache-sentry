@@ -3,6 +3,7 @@
   "version": "0.3.2",
   "private": true,
   "description": "Passive Chrome extension that flags web cache deception signals while you browse.",
+  "author": "CodeWithSamzy",
   "license": "MIT",
   "scripts": {
     "test": "node test/detection.test.js",

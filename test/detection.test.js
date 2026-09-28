@@ -804,6 +804,11 @@ test("manifest ships an icon at every size Chrome asks for", () => {
   }
 });
 
+test("the manifest credits the author", () => {
+  const m = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
+  assert.strictEqual(m.author, "CodeWithSamzy");
+  assert.match(m.homepage_url || "", /github\.com\/CodeWithSamzy\/Cache-sentry/);
+});
 test("the extension version matches package.json", () => {
   const m = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));

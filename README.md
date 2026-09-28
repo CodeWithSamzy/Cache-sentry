@@ -4,6 +4,8 @@ A passive Chrome extension that flags potential **web cache deception**
 signals while you browse — no active exploitation, just observation of
 response headers on requests that carry a session cookie.
 
+Built by [CodeWithSamzy](https://github.com/CodeWithSamzy).
+
 ## What it detects
 
 A request is flagged when **all** of these are true:

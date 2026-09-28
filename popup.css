@@ -217,6 +217,15 @@ footer .note {
   margin: 8px 0 0;
 }
 
+footer .byline {
+  margin: 8px 0 0;
+  color: #8a8880;
+}
+
+footer .byline a {
+  color: #8a5a12;
+}
+
 #export {
   padding: 5px 9px;
   border: 1px solid #d5d3cb;

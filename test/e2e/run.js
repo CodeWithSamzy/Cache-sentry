@@ -216,6 +216,11 @@ async function runPopupScenario(session, origin) {
   }
   if (!/x-cache: HIT/.test(text)) problems.push("popup did not show the cache evidence");
 
+  // The credit line is user-visible, so keep it from silently disappearing.
+  const byline = await popup.eval(
+    '(document.querySelector("footer .byline") || {}).innerText || ""'
+  );
+  if (!byline.includes("CodeWithSamzy")) problems.push("the popup does not credit the author");
   // The export is the only thing that leaves the popup, so check its shape.
   const report = JSON.parse(
     await popup.eval("JSON.stringify(buildReport(currentFindings))")
