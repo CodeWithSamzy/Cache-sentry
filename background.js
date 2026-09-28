@@ -128,6 +128,18 @@ const STATIC_ASSET_PATH =
 const DELIMITER_PATH =
   /%2e%2e|%2f%2f|%00|%23|%3f|;(?!jsessionid|phpsessid|aspsessionid)/i;
 
+// Only the path can make a cache and an origin disagree about what a URL
+// means. A token like %2f%2f inside a query value is ordinary data -- Google
+// Analytics puts the page URL in `url=https%3A%2F%2F...`, and matching the
+// whole URL flagged every analytics beacon on a page.
+function pathOf(url) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return String(url);
+  }
+}
+
 // The actual cache deception signal: a private document or API payload served
 // under a URL that looks like a static file. A genuine asset answers as
 // javascript/css/image, so a document response is the contradiction we want.
@@ -284,8 +296,9 @@ chrome.webRequest.onHeadersReceived.addListener(
 
     if (!info) return;
 
-    const assetMatch = STATIC_ASSET_PATH.exec(info.url);
-    const delimiterMatch = DELIMITER_PATH.exec(info.url);
+    const path = pathOf(info.url);
+    const assetMatch = STATIC_ASSET_PATH.exec(path);
+    const delimiterMatch = DELIMITER_PATH.exec(path);
     if (!assetMatch && !delimiterMatch) return;
     if (details.tabId < 0) return;
 

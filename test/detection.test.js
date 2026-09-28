@@ -67,7 +67,8 @@ function loadWorker({ storage = {}, liveTabs, failStorage = false } = {}) {
     runtime: { onMessage: { addListener: (fn) => (L.msg = fn) } },
   };
 
-  const ctx = vm.createContext({ chrome, console });
+  // URL is a real global in a service worker, so the sandbox needs it too.
+  const ctx = vm.createContext({ chrome, console, URL });
   vm.runInContext(
     SOURCE +
       "\n;globalThis.__findings = (t) => findingsByTab[t] || [];" +
@@ -1080,4 +1081,57 @@ test("a cookie-less 304 is still reported as having no session cookie", () => {
     responseHeaders: HTML_CACHEABLE,
   });
   assert.strictEqual(w.skips()[0].reason, "no-session-cookie");
+});
+
+// --- false positives found on jobleads.com -----------------------------------
+// A %2f%2f inside a query *value* is ordinary data: Google Analytics puts the
+// page URL in `url=https%3A%2F%2F...`. Matching the whole URL instead of the
+// path flagged every analytics beacon on the page.
+
+test("FALSE POSITIVE FIX: a delimiter inside a query value is not a delimiter", () => {
+  const w = loadWorker();
+  w.request({
+    url:
+      "https://region1.analytics.google.com/measurement/conversion" +
+      "?tid=G-EEJVSHV3LN&url=https%3A%2F%2Fwww.jobleads.com%2Fhome" +
+      "&ref=https%3A%2F%2Faccounts.google.com%2F",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 0, "a %2f%2f in a query value is ordinary data");
+  assert.strictEqual(w.skips().length, 0, "it should not even look suspicious");
+});
+
+test("FALSE POSITIVE FIX: a file extension inside a query value is not one", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/page?next=/home.js",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 0);
+  assert.strictEqual(w.skips().length, 0);
+});
+
+test("an extension in the path still matches when a query follows", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/my-account/nonexistent.js?debug=1",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 1, "the path is what counts");
+});
+
+test("a real delimiter in the path still flags alongside a query", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/my-account%2f%2fsecret?url=https%3A%2F%2Fx%2F",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 1);
+  assert.strictEqual(w.findings()[0].evidence.delimiter, "%2f%2f");
+});
+
+test("a URL that will not parse is still examined", () => {
+  const w = loadWorker();
+  w.request({ url: "not-a-url/my-account/x.js", responseHeaders: HTML_CACHEABLE });
+  assert.strictEqual(w.findings().length, 1, "fall back to the raw string");
 });

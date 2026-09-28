@@ -49,6 +49,10 @@ header {
   word-break: break-all;
   font-weight: 500;
   margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .tag {
@@ -116,6 +120,10 @@ header {
   font-size: 10px;
   color: #3d4550;
   margin-bottom: 3px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .doc .verdict {
@@ -187,6 +195,10 @@ header {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
   margin-bottom: 3px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .skip .reason {

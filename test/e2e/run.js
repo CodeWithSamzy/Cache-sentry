@@ -373,6 +373,45 @@ async function runDocumentScenario(session, origin) {
   return problems;
 }
 
+// A %2f%2f inside a query value is ordinary data: Google Analytics puts the page
+// URL in `url=https%3A%2F%2F...`. Matching the whole URL instead of the path
+// flagged every analytics beacon on the page.
+async function runQueryDelimiterScenario(session, origin) {
+  const problems = [];
+  const url = origin + "/plain.html?next=https%3A%2F%2Fexample.com%2Fhome";
+
+  await session.visit(url, 1800);
+
+  // If the probe was never seen, or Chrome decoded the query on the way, then
+  // a clean result proves nothing. Fail loudly instead of passing emptily.
+  const docs = JSON.parse(
+    await session.worker.eval("JSON.stringify(recentDocuments)", true)
+  );
+  const seen = Object.values(docs)
+    .flat()
+    .find((load) => load.url.includes("plain.html?next="));
+  if (!seen) return ["the probe URL was never observed, so this check proves nothing"];
+  if (!/%2f%2f/i.test(seen.url)) {
+    return ["Chrome normalised the probe query, so this check proves nothing"];
+  }
+
+  const findings = await session.snapshot();
+  const flagged = Object.values(findings).some((rows) =>
+    (rows || []).some((finding) => finding.url.includes("plain.html?next="))
+  );
+  if (flagged) problems.push("a query value containing %2f%2f was flagged as a delimiter");
+
+  const skips = JSON.parse(
+    await session.worker.eval("JSON.stringify(recentSkips)", true)
+  );
+  const rejected = Object.values(skips).some((rows) =>
+    (rows || []).some((skip) => skip.url.includes("plain.html?next="))
+  );
+  if (rejected) problems.push("it should not even have looked suspicious");
+
+  return problems;
+}
+
 async function runPersistenceScenario(session, origin) {
   const problems = [];
 
@@ -480,6 +519,7 @@ async function main() {
       { name: "popup collapses repeats and explains the finding", run: () => runPopupScenario(session, site.origin) },
       { name: "the skip log explains why a safe request was ignored", run: () => runSkipLogScenario(session, site.origin) },
       { name: "the page load readout shows a static directory being cached", run: () => runDocumentScenario(session, site.origin) },
+      { name: "a delimiter in a query value is not a delimiter", run: () => runQueryDelimiterScenario(session, site.origin) },
       { name: "findings survive a service worker restart", run: () => runPersistenceScenario(session, site.origin) },
     ];
 

@@ -14,7 +14,8 @@ A request is flagged when **all** of these are true:
 2. The URL looks like a static asset (`.css`, `.js`, `.png`, ...) or carries a
    delimiter that makes caches and origins disagree about it (`%2e%2e`,
    `%2f%2f`, `%00`, `%23`, `%3f`, or a `;` path parameter -- the benign
-   `;jsessionid=` form is excluded).
+   `;jsessionid=` form is excluded). Only the path is examined, so a `%2f%2f`
+   or a `.js` inside a query value is treated as ordinary data.
 3. **The response contradicts the URL**: it comes back as a document or data
    payload (`text/html`, `text/plain`, JSON, XML) instead of the asset type the
    URL claims. This is the part that matters. `/static/app.js` answering with

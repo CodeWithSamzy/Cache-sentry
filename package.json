@@ -1,6 +1,6 @@
 {
   "name": "cache-sentry",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "Passive Chrome extension that flags web cache deception signals while you browse.",
   "license": "MIT",

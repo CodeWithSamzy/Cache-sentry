@@ -53,7 +53,7 @@ function findingHtml(finding) {
 
   return `
     <div class="finding">
-      <div class="url">${tags}${escapeHtml(finding.url)}${countHtml}</div>
+      <div class="url" title="${escapeHtml(finding.url)}">${tags}${escapeHtml(finding.url)}${countHtml}</div>
       <div class="why">${escapeHtml(whyText(finding.evidence))}</div>
       <div class="meta">${escapeHtml(meta)}</div>
     </div>
