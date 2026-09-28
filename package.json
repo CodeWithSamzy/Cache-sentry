@@ -8,6 +8,7 @@
   "scripts": {
     "test": "node test/detection.test.js",
     "test:e2e": "node test/e2e/run.js",
-    "test:all": "npm test && npm run test:e2e"
+    "test:all": "npm test && npm run test:e2e",
+    "package": "node tools/package.js"
   }
 }

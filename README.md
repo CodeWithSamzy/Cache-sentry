@@ -34,13 +34,46 @@ A request is flagged when **all** of these are true:
 This is a **signal, not proof** -- always verify manually (e.g. with curl
 or Burp) before treating a flagged request as a real vulnerability.
 
-## Install (unpacked, for development)
+## Install
 
-1. Open Chrome and go to `chrome://extensions`
-2. Toggle **Developer mode** on (top right)
-3. Click **Load unpacked**
-4. Select this folder (`cache-sentry`)
-5. The extension icon should appear in your toolbar
+Cache Sentry is not in the Chrome Web Store yet, so installing it takes one
+manual step. There is nothing to build: Chrome runs the source files as they
+are, so nobody needs Node or npm to install it.
+
+### If you just want to use it
+
+1. Open the [Releases page](https://github.com/CodeWithSamzy/Cache-sentry/releases)
+   and download the newest `cache-sentry-<version>-unpacked.zip`. If no release
+   is listed yet, use **Code > Download ZIP** on the repository page instead --
+   that folder works too, it just carries the tests and docs along with it
+2. Unzip it. You get a single folder named `cache-sentry`. Keep it somewhere
+   permanent -- Chrome reads that folder every time it starts, and the
+   extension stops working if the folder is moved or deleted
+3. Open `chrome://extensions` in Chrome
+4. Turn on **Developer mode** (top right)
+5. Click **Load unpacked** and select the `cache-sentry` folder
+6. The icon appears beside the address bar. Use the puzzle-piece menu to pin
+   **Cache Sentry** so the badge count is visible
+
+Chrome shows a developer-mode notice for any extension installed this way and
+may warn that it is not from the store. That warning is expected here; it is
+not a sign of a problem with the extension.
+
+To update, download the newer zip, replace the folder, and press the reload
+arrow on the extension card in `chrome://extensions`. There are no automatic
+updates without a store listing.
+
+### If you are working on the code
+
+`git clone https://github.com/CodeWithSamzy/Cache-sentry.git`, then follow
+steps 3-6 above and point **Load unpacked** at the repository folder. Chrome
+ignores the files it does not need (`test/`, `docs/`, `tools/`, `dist/`).
+
+### Other Chromium browsers
+
+Edge, Brave, Vivaldi and Opera load the same folder from their own extensions
+page (`edge://extensions`, `brave://extensions`, and so on). Edge Add-ons also
+accepts the same package if this is ever published there.
 
 ## How to use it
 
@@ -115,6 +148,18 @@ legal place to test this — load a lab, log in, and browse to a path like
 npm test          # unit suite, no browser required
 npm run test:e2e  # browser suite, needs Chrome
 npm run test:all  # both
+npm run package   # builds the two dist/*.zip archives
+```
+
+**`npm run package`** writes both distribution archives. The file list is
+derived from `manifest.json` and `popup.html`, so an asset that is referenced
+but missing fails the build instead of shipping a broken extension. Each
+archive is unpacked and checksummed as it is written:
+
+| Archive | Shape | Used for |
+| --- | --- | --- |
+| `dist/cache-sentry-<version>.zip` | `manifest.json` at the archive root | uploading to a store |
+| `dist/cache-sentry-<version>-unpacked.zip` | one `cache-sentry/` folder | the manual install above |
 ```
 
 **`npm test`** loads `background.js` in a Node VM with a stubbed `chrome` API
@@ -183,6 +228,9 @@ Chrome 137+ branded builds ignore `--load-extension` and
 - Turn the readout into a verdict: when a URL that `Vary`s on a credential is
   still served `from cache`, say so outright instead of leaving it to be read
 - Screenshots of the popup for the store listing
+- Publish to the Chrome Web Store (one-time 5 USD developer fee) or Edge
+  Add-ons (free, same package) so installing becomes a single click instead of
+  a manual load
 
 ## Privacy
 
