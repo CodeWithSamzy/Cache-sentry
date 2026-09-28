@@ -178,6 +178,43 @@ function isDocumentResponse(headers) {
   return !!contentType && DOCUMENT_CONTENT_TYPE.test(contentType);
 }
 
+// Statuses that carry no body, so their Content-Type describes nothing. X
+// answers .json endpoints with a 304 carrying a leftover text/html type, which
+// is not "a document came back" and must not be read as one.
+const BODYLESS_STATUS = new Set([204, 304]);
+
+function hasBody(statusCode) {
+  if (typeof statusCode !== "number") return true;
+  return statusCode >= 200 && !BODYLESS_STATUS.has(statusCode);
+}
+
+// Extensions whose file type is one of the document types above: a .json file
+// really is JSON, and so is a source map. The response only counts as a
+// contradiction when the extension cannot explain it, which is what stops every
+// authenticated JSON API call from being flagged.
+const SELF_DESCRIBING = new Set(["json", "map"]);
+
+function contradictsUrl(extension, headers) {
+  if (!extension) return true;
+
+  const contentType = headerValue(headers, "content-type");
+  if (!contentType) return true;
+
+  const base = contentType.split(";")[0].trim().toLowerCase();
+  if (SELF_DESCRIBING.has(String(extension).toLowerCase())) {
+    return !/json$/.test(base);
+  }
+
+  return true;
+}
+
+// A cache header only proves a response came from a cache when it says so.
+// Cloudflare sends `cf-cache-status: DYNAMIC` on nearly every API response,
+// and reading that as cacheable flagged normal authenticated traffic.
+function cacheStatusIsHit(value) {
+  return !!value && /hit/i.test(value);
+}
+
 function isCacheableResponse(headers) {
   const cacheControl = headerValue(headers, "cache-control");
   const age = headerValue(headers, "age");
@@ -185,10 +222,20 @@ function isCacheableResponse(headers) {
   const cfCache = headerValue(headers, "cf-cache-status");
 
   const explicitlyPrivate =
-    cacheControl && /no-store|private/i.test(cacheControl);
+    !!cacheControl && /no-store|private/i.test(cacheControl);
 
-  const looksCacheable =
-    (cacheControl && !explicitlyPrivate) || age || xCache || cfCache;
+  // Proof it was actually served by a shared cache. A hit beats everything:
+  // a response that says no-store and still came back as a hit is a broken
+  // cache, which is worth reporting.
+  const servedFromCache =
+    cacheStatusIsHit(xCache) ||
+    cacheStatusIsHit(cfCache) ||
+    (age != null && Number(age) > 0);
+
+  // Permission to store it, which is all a first, uncached response can show.
+  const allowsSharing = !explicitlyPrivate && (cacheControl != null || age != null);
+
+  const looksCacheable = servedFromCache || allowsSharing;
 
   return {
     looksCacheable: !!looksCacheable,
@@ -251,6 +298,17 @@ chrome.webRequest.onHeadersReceived.addListener(
       return;
     }
 
+    // A bodyless response has no Content-Type worth comparing.
+    if (!hasBody(details.statusCode)) {
+      recordSkip(
+        details.tabId,
+        info.url,
+        "no-body",
+        String(details.statusCode)
+      );
+      return;
+    }
+
     // The URL only looks suspicious; the response has to back it up. An asset
     // URL answering with a document is what a successful deception looks like,
     // and requiring it is what removes ordinary static-asset noise.
@@ -259,6 +317,18 @@ chrome.webRequest.onHeadersReceived.addListener(
         details.tabId,
         info.url,
         "not-document",
+        headerValue(headers, "content-type")
+      );
+      return;
+    }
+
+    // The response has to contradict what the URL claims to be. A .json URL
+    // answering with JSON is exactly what it promised.
+    if (!contradictsUrl(assetMatch ? assetMatch[0].slice(1) : null, headers)) {
+      recordSkip(
+        details.tabId,
+        info.url,
+        "matches-url",
         headerValue(headers, "content-type")
       );
       return;

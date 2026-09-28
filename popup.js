@@ -135,6 +135,14 @@ function skipReasonText(reason, detail) {
       ? `the response was served as ${detail}, not a document`
       : "the response was not a document";
   }
+  if (reason === "no-body") {
+    return `a ${detail} response carries no body, so there is nothing to compare`;
+  }
+  if (reason === "matches-url") {
+    return detail
+      ? `the response was served as ${detail}, which is what the URL already claims`
+      : "the response matched the type the URL claims";
+  }
   if (reason === "varies-on-credentials") {
     return `the response varies on ${detail || "credentials"}, so each user gets their own copy`;
   }

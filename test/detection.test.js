@@ -953,3 +953,131 @@ test("records a document load whose request headers were never seen", () => {
   assert.strictEqual(w.documents().length, 1, "a missed cookie read must not hide the page");
   assert.strictEqual(w.documents()[0].hasSessionCookie, false);
 });
+
+// --- false positives found on a real site (x.com) ----------------------------
+// Two of these fired on every X page load: a 304 whose leftover text/html type
+// was read as "a document came back", and .json endpoints whose JSON response
+// was read as contradicting a .json URL.
+
+test("FALSE POSITIVE FIX: a .json URL that answers with JSON is not flagged", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://x.com/i/api/1.1/hashflags.json",
+    responseHeaders: [
+      ["content-type", "application/json;charset=utf-8"],
+      ["cache-control", "public, max-age=1800"],
+      ["cf-cache-status", "DYNAMIC"],
+    ],
+  });
+  assert.strictEqual(w.findings().length, 0, "JSON under a .json URL is what it promised");
+  assert.strictEqual(w.skips()[0].reason, "matches-url");
+  assert.strictEqual(w.skips()[0].detail, "application/json;charset=utf-8");
+});
+
+test("a source map that answers with JSON is not flagged", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/static/app.js.map",
+    responseHeaders: [["content-type", "application/json"], ...CACHEABLE],
+  });
+  assert.strictEqual(w.findings().length, 0, "a source map really is JSON");
+});
+
+test("a .json URL that answers with HTML is still flagged", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/api/me/profile.json",
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 1, "an HTML document under .json is the shape");
+});
+
+test("FALSE POSITIVE FIX: a 304 has no body to contradict the URL", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://api.x.com/1.1/help/settings.json?include_zero_rate=true",
+    status: 304,
+    responseHeaders: [
+      ["content-type", "text/html;charset=utf-8"],
+      ["cache-control", "no-cache, no-store, must-revalidate, pre-check=0, post-check=0"],
+      ["cf-cache-status", "DYNAMIC"],
+    ],
+  });
+  assert.strictEqual(w.findings().length, 0, "a 304 serves no body at all");
+  assert.strictEqual(w.skips()[0].reason, "no-body");
+  assert.strictEqual(w.skips()[0].detail, "304");
+});
+
+test("a 204 counts as bodyless too", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/save.css",
+    status: 204,
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.findings().length, 0);
+  assert.strictEqual(w.skips()[0].reason, "no-body");
+});
+
+test("FALSE POSITIVE FIX: cf-cache-status: DYNAMIC is not evidence of caching", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/me.js",
+    responseHeaders: [...HTML, ["cf-cache-status", "DYNAMIC"]],
+  });
+  assert.strictEqual(w.findings().length, 0, "DYNAMIC means the cache declined to store it");
+  assert.strictEqual(w.skips()[0].reason, "not-cacheable");
+});
+
+test("x-cache: MISS is not evidence of caching either", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/me.js",
+    responseHeaders: [...HTML, ["x-cache", "MISS"]],
+  });
+  assert.strictEqual(w.findings().length, 0);
+  assert.strictEqual(w.skips()[0].reason, "not-cacheable");
+});
+
+test("no-store still suppresses next to a non-hit cache status", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/me.js",
+    responseHeaders: [
+      ...HTML,
+      ["cache-control", "no-cache, no-store, must-revalidate"],
+      ["cf-cache-status", "DYNAMIC"],
+    ],
+  });
+  assert.strictEqual(w.findings().length, 0);
+  assert.strictEqual(w.skips()[0].reason, "not-cacheable");
+});
+
+test("a real hit beats no-store, because a broken cache is the finding", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/me.js",
+    responseHeaders: [...HTML, ["cache-control", "no-store"], ["x-cache", "HIT"]],
+  });
+  assert.strictEqual(w.findings().length, 1);
+});
+
+test("a non-zero Age is proof of a shared cache on its own", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/me.js",
+    responseHeaders: [...HTML, ["age", "42"]],
+  });
+  assert.strictEqual(w.findings().length, 1);
+});
+
+test("a cookie-less 304 is still reported as having no session cookie", () => {
+  const w = loadWorker();
+  w.request({
+    url: "https://example.com/acct/me.css",
+    cookie: "",
+    status: 304,
+    responseHeaders: HTML_CACHEABLE,
+  });
+  assert.strictEqual(w.skips()[0].reason, "no-session-cookie");
+});

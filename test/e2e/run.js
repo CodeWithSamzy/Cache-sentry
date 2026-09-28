@@ -143,13 +143,14 @@ const tabHolding = (snapshot, suffix) =>
 
 const pathScenarios = [
   {
-    name: "a document under an asset URL flags; ordinary assets do not",
+    name: "a document under an asset URL flags; ordinary assets and matching types do not",
     paths: {
       "/deception.js": true,
       "/static-app.js": false,
       "/asset.png": false,
       "/no-store.js": false,
       "/plain.html": false,
+      "/api/me.json": false,
     },
   },
   {
@@ -297,6 +298,15 @@ async function runSkipLogScenario(session, origin) {
     'document.querySelectorAll("#skips img, #skips script").length'
   );
   if (skipInjected !== 0) problems.push("a skip entry injected markup into the popup");
+
+  // A reason with no wording falls through to the raw string, which would
+  // make the log unreadable exactly when it is needed.
+  for (const reason of ["no-body", "matches-url"]) {
+    const wording = await popup.eval(
+      `skipReasonText(${JSON.stringify(reason)}, "application/json")`
+    );
+    if (wording === reason) problems.push("the popup has no wording for " + reason);
+  }
 
   popup.close();
   return problems;

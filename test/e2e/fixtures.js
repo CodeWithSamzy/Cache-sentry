@@ -38,6 +38,18 @@ const ROUTES = {
     body: "png bytes",
   }),
 
+  // A JSON API call: the URL promises JSON and gets JSON, so there is no
+  // contradiction even though a session cookie rode along (the x.com shape).
+  "/api/me.json": () => ({
+    status: 200,
+    headers: {
+      "Content-Type": "application/json;charset=utf-8",
+      ...CACHEABLE,
+      "cf-cache-status": "DYNAMIC",
+    },
+    body: "{\"ok\":true}",
+  }),
+
   // Gates that must still suppress.
   "/no-store.js": () => ({
     status: 200,

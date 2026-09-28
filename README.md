@@ -20,6 +20,8 @@ A request is flagged when **all** of these are true:
    URL claims. This is the part that matters. `/static/app.js` answering with
    JavaScript is an ordinary asset and is never flagged, while
    `/my-account/x.js` answering with HTML is the real cache deception shape.
+   The comparison is real: `/api/user.json` answering with JSON, and a `.js.map`
+   answering with JSON, are what those URLs promise and are not flagged.
 4. The response carries cache-related headers (`Cache-Control` without
    `no-store`/`private`, `Age`, `X-Cache`, or `CF-Cache-Status`).
 5. The response does not vary on credentials. A `Vary` naming `Cookie` or
@@ -68,6 +70,8 @@ dropped, with the reason:
 | --- | --- |
 | `no-session-cookie` | the request sent no session cookie, so there was nothing private to leak |
 | `not-document` | the response really was the asset type the URL claimed (e.g. `text/javascript`) |
+| `no-body` | the response has no body at all (a `304` revalidation), so its `Content-Type` means nothing |
+| `matches-url` | the response type is what the URL already claims, so nothing is contradicted |
 | `varies-on-credentials` | the response varies on `Cookie`/`Authorization`, so each user gets their own copy |
 | `not-cacheable` | no shared cache would keep it (`no-store`, `private`, or no cache headers at all) |
 
@@ -154,6 +158,10 @@ Chrome 137+ branded builds ignore `--load-extension` and
   even when a cache is storing it. **Page loads** shows it instead, which keeps
   the finding list clear of the false positives that shape would otherwise
   produce.
+- A cached JSON API is out of scope by design. Once the URL and the response
+  type agree (`.json` answering with JSON) there is nothing to contradict, and
+  headers alone cannot tell a public config endpoint from a private one. Such a
+  response only shows up in **Page loads**.
 - Everything here is a heuristic over response headers. It is checked against a
   fixture server and the unit suite, but not yet against a live vulnerable
   target, so treat the first real-world run as a calibration exercise.
