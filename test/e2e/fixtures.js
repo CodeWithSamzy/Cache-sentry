@@ -74,7 +74,9 @@ const ROUTES = {
   }),
 };
 
-function start() {
+function start(port = 0) {
+  // Port 0 lets the OS pick; the screenshot tool asks for a fixed one so the
+  // captured URLs look stable.
   // Requests under a static directory behave like a CDN with a static
   // directory cache rule: the first one misses and is stored, later ones are
   // served from cache. This is the shape the detector cannot see, because the
@@ -109,7 +111,7 @@ function start() {
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(port, "127.0.0.1", () => {
       const { port } = server.address();
       resolve({ server, port, origin: "http://127.0.0.1:" + port });
     });

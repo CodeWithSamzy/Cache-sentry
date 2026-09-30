@@ -9,6 +9,7 @@
     "test": "node test/detection.test.js",
     "test:e2e": "node test/e2e/run.js",
     "test:all": "npm test && npm run test:e2e",
-    "package": "node tools/package.js"
+    "package": "node tools/package.js",
+    "screenshots": "node tools/capture-screenshots.js"
   }
 }

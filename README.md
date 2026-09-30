@@ -9,6 +9,24 @@ Built by [CodeWithSamzy](https://github.com/CodeWithSamzy).
 **Install:** [download the latest release](https://github.com/CodeWithSamzy/Cache-sentry/releases/latest)
 and follow [the install steps](#install).
 
+## Screenshots
+
+![The Cache Sentry popup listing two findings: a .css URL repeated three times and a .js URL, both answered with text/html, above a Page loads entry marked from cache](docs/screenshots/popup-finding.png)
+
+<details>
+<summary>What the cache did with this tab's page loads, and why a request was not flagged</summary>
+
+![The Page loads readout showing one load served from cache with age and x-cache: HIT, and an earlier load with no cache hit](docs/screenshots/popup-page-loads.png)
+
+![The rejected-request log showing a .js request not flagged because the response was served as text/javascript, and another because it varies on Cookie](docs/screenshots/popup-skipped-requests.png)
+
+</details>
+
+These are real captures, not mockups: the extension loaded in headless
+Chrome, rendering findings the service worker actually produced. The site is
+the fixture server in `test/e2e/fixtures.js`, so nothing here came from a live
+target. `npm run screenshots` regenerates them.
+
 ## What it detects
 
 A request is flagged when **all** of these are true:
@@ -146,10 +164,11 @@ legal place to test this — load a lab, log in, and browse to a path like
 ## Tests
 
 ```
-npm test          # unit suite, no browser required
-npm run test:e2e  # browser suite, needs Chrome
-npm run test:all  # both
-npm run package   # builds the two dist/*.zip archives
+npm test                  # unit suite, no browser required
+npm run test:e2e          # browser suite, needs Chrome
+npm run test:all          # both
+npm run package           # builds the two dist/*.zip archives
+npm run screenshots       # re-captures docs/screenshots/ in Chrome
 ```
 
 **`npm run package`** writes both distribution archives. The file list is
@@ -161,6 +180,10 @@ archive is unpacked and checksummed as it is written:
 | --- | --- | --- |
 | `dist/cache-sentry-<version>.zip` | `manifest.json` at the archive root | uploading to a store |
 | `dist/cache-sentry-<version>-unpacked.zip` | one `cache-sentry/` folder | the manual install above |
+
+**`npm run screenshots`** drives a real headless Chrome with the extension
+loaded and captures the popup, so the images in this README cannot drift from
+what the extension actually renders. It writes into `docs/screenshots/`.
 ```
 
 **`npm test`** loads `background.js` in a Node VM with a stubbed `chrome` API
@@ -228,7 +251,9 @@ Chrome 137+ branded builds ignore `--load-extension` and
   the real headers look like so the heuristics can be tuned to them
 - Turn the readout into a verdict: when a URL that `Vary`s on a credential is
   still served `from cache`, say so outright instead of leaving it to be read
-- Screenshots of the popup for the store listing
+- Compose 1280x800 listing screenshots. `npm run screenshots` already produces
+  the popup captures the README uses, but the store wants 1280x800 or 640x400
+  images, so those files need the popup put on a browser-sized canvas
 - Publish to the Chrome Web Store (one-time 5 USD developer fee) or Edge
   Add-ons (free, same package) so installing becomes a single click instead of
   a manual load
